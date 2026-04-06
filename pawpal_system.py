@@ -94,12 +94,19 @@ class Task:
         self.latest_end = latest_end
         self.notes = notes
         self.required_pet_id = required_pet_id
+        self.next_due: Optional[date] = None   # set when a recurring task is completed
 
     # -- Status helpers ------------------------------------------------------
 
-    def complete(self) -> None:
-        """Mark this task as done."""
+    def complete(self, today: Optional[date] = None) -> None:
+        """Mark this task done and calculate the next due date for recurring tasks."""
         self.completed = True
+        if self.recurrence and today:
+            rec = self.recurrence.lower().strip()
+            if rec == "daily":
+                self.next_due = today + timedelta(days=1)
+            elif rec == "weekly":
+                self.next_due = today + timedelta(weeks=1)
 
     def reset(self) -> None:
         """Clear completion so the task can be scheduled again (e.g. next day)."""
@@ -108,6 +115,24 @@ class Task:
     def is_recurring(self) -> bool:
         """Return True if the task repeats on a schedule."""
         return bool(self.recurrence)
+
+    def spawn_next_occurrence(self) -> Optional["Task"]:
+        """Return a fresh copy of this task reset for its next due date, or None if not recurring."""
+        if not self.recurrence or not self.next_due:
+            return None
+        new_task = Task(
+            title=self.title,
+            description=self.description,
+            duration_minutes=self.duration_minutes,
+            priority=self.priority,
+            recurrence=self.recurrence,
+            earliest_start=self.earliest_start,
+            latest_end=self.latest_end,
+            notes=self.notes,
+            required_pet_id=self.required_pet_id,
+        )
+        new_task.next_due = self.next_due
+        return new_task
 
     # -- Validation ----------------------------------------------------------
 
@@ -131,6 +156,7 @@ class Task:
             "priority": self.priority.value,
             "recurrence": self.recurrence,
             "completed": self.completed,
+            "next_due": self.next_due.isoformat() if self.next_due else None,
             "earliest_start": str(self.earliest_start) if self.earliest_start else None,
             "latest_end": str(self.latest_end) if self.latest_end else None,
             "notes": self.notes,
@@ -218,13 +244,16 @@ class Pet:
 
     # -- Completion helpers --------------------------------------------------
 
-    def complete_task(self, task_id: uuid.UUID) -> bool:
-        """Mark a task done by ID. Returns True if found."""
+    def complete_task(self, task_id: uuid.UUID, today: Optional[date] = None) -> bool:
+        """Mark a task done by ID; if recurring, add the next occurrence. Returns True if found."""
         task = self.get_task(task_id)
-        if task:
-            task.complete()
-            return True
-        return False
+        if not task:
+            return False
+        task.complete(today or date.today())
+        next_task = task.spawn_next_occurrence()
+        if next_task:
+            self._tasks.append(next_task)
+        return True
 
     def reset_all_tasks(self) -> None:
         """Clear completion flags (call at the start of each new day)."""
@@ -501,6 +530,47 @@ class Scheduler:
             p.value: owner.tasks_by_priority(p)
             for p in Priority
         }
+
+    def sort_by_time(self, tasks: List[Task]) -> List[Task]:
+        """Sort tasks by earliest_start time using a lambda key; tasks with no start time go last."""
+        return sorted(
+            tasks,
+            key=lambda t: (t.earliest_start is None, t.earliest_start or time(0, 0))
+        )
+
+    def filter_tasks(
+        self,
+        owner: Owner,
+        pet_name: Optional[str] = None,
+        completed: Optional[bool] = None,
+    ) -> List[Task]:
+        """Return tasks filtered by pet name and/or completion status; pass None to skip a filter."""
+        results = []
+        for pet in owner.get_pets():
+            if pet_name and pet.name.lower() != pet_name.lower():
+                continue
+            for task in pet.get_tasks():
+                if completed is not None and task.completed != completed:
+                    continue
+                results.append(task)
+        return results
+
+    def detect_conflicts(self, schedule: "Schedule") -> List[str]:
+        """Check scheduled slots for time overlaps and return a list of warning strings."""
+        warnings = []
+        slots = schedule.slots
+        for i in range(len(slots)):
+            for j in range(i + 1, len(slots)):
+                a, b = slots[i], slots[j]
+                if a.start and a.end and b.start and b.end:
+                    overlap_start = max(a.start, b.start)
+                    overlap_end   = min(a.end,   b.end)
+                    if overlap_start < overlap_end:
+                        warnings.append(
+                            f"CONFLICT: '{a.title}' ({a.start.strftime('%H:%M')}–{a.end.strftime('%H:%M')}) "
+                            f"overlaps '{b.title}' ({b.start.strftime('%H:%M')}–{b.end.strftime('%H:%M')})"
+                        )
+        return warnings
 
     # -- Scheduling ----------------------------------------------------------
 
