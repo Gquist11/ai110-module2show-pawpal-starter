@@ -22,6 +22,20 @@ Your final app should:
 - Display the plan clearly (and ideally explain the reasoning)
 - Include tests for the most important scheduling behaviors
 
+## Smarter Scheduling
+
+Beyond basic priority-first placement, the scheduler now includes four algorithmic improvements:
+
+**Sort by time** — `Scheduler.sort_by_time(tasks)` orders any list of tasks by their `earliest_start` wall-clock time using a lambda key, with tasks that have no start constraint placed last.
+
+**Filter by pet or status** — `Scheduler.filter_tasks(owner, pet_name, completed)` lets you pull a focused slice of tasks, e.g. only Luna's pending items or every completed task across all pets.
+
+**Recurring task auto-spawn** — When a `daily` or `weekly` task is marked complete, `Task.complete(today)` calculates the `next_due` date using Python's `timedelta`, and `Pet.complete_task()` automatically adds a fresh copy of the task to the pet's list so it appears in tomorrow's plan.
+
+**Conflict detection** — `Scheduler.detect_conflicts(schedule)` scans every pair of scheduled slots and reports any time overlaps as plain-English warning strings instead of crashing, so the user is informed without the app breaking.
+
+---
+
 ## Getting started
 
 ### Setup

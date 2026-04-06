@@ -1,0 +1,31 @@
+{
+  "name": "pawpal-app",
+  "version": "1.0.0",
+  "description": "A pet care application that helps pet owners manage their pet care tasks and schedules.",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "jest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/pawpal-app.git"
+  },
+  "keywords": [
+    "pet",
+    "care",
+    "scheduler",
+    "notifications"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "typescript": "^4.5.4",
+    "jest": "^27.0.6"
+  },
+  "devDependencies": {
+    "@types/jest": "^27.0.2",
+    "@types/node": "^16.11.7"
+  }
+}
