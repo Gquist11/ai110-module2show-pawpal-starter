@@ -31,19 +31,19 @@ the owner and pet data feed into a scheduler that turns task into a daily plan. 
 
 Yes, a few things changed once I started writing the actual code.
 
-**1. The scheduler now returns a full plan, not just a list.**
+1. The scheduler now returns a full plan, not just a list.
 At first the scheduler just handed back a list of time slots. But I kept needing other info too — like the date, how many minutes were scheduled, and which tasks didn't fit. So I wrapped everything into one "Schedule" object that holds all of that together in one place.
 
-**2. Owners can now have more than one free window per day.**
+2. Owners can now have more than one free window per day.
 The original design only let you set one start time and one end time for the owner's availability. That didn't work for real life — someone might be free in the morning AND the evening. I changed it so you can add as many time windows as you need, and the scheduler will try each one.
 
-**3. Each task slot now knows which pet it belongs to.**
+3. Each task slot now knows which pet it belongs to.
 Early on, a scheduled slot had no idea which pet it was for. That made it hard to show the pet's name in the app. I added a "pet" field to each slot so it always carries that info with it.
 
-**4. Pet and Owner can do more than just hold data.**
+4. Pet and Owner can do more than just hold data.
 Originally Pet and Owner were just containers — they stored info but didn't do much. As I built the app, I kept needing things like "show me only the unfinished tasks" or "mark this task as done." So I gave Pet and Owner their own helpful actions instead of putting all that work on the Scheduler.
 
-**5. Priority now accepts plain words like "high" or "low".**
+5. Priority now accepts plain words like "high" or "low".
 The app's input form sends priority as a regular word. The original code only understood its own internal format and would crash on plain text. I added a small helper that converts any version of the word into the right format automatically.
 
 ---
@@ -60,7 +60,7 @@ The app's input form sends priority as a regular word. The original code only un
 - Describe one tradeoff your scheduler makes.
 - Why is that tradeoff reasonable for this scenario?
 
-The conflict detector checks whether two scheduled slots overlap in time, but it only compares the final placed slots — it does not look ahead to warn you before the schedule is built. This means if the greedy scheduler quietly shifts a task to avoid a clash, no warning is shown even though two tasks wanted the same window. The tradeoff is simplicity: checking every pair of finished slots is easy to read and test, while pre-schedule conflict prediction would require running the algorithm twice or keeping extra state. For a single-owner, single-day planner this is reasonable — the user can see the output and spot if something landed in an unexpected time. A future version could add a pre-check that warns when two tasks share the same `earliest_start` before placement begins.
+The scheduler picks tasks in priority order and places them one at a time from the start of the available window. This is fast and simple, but it means a long high-priority task can block a short medium-priority task that needed that same early slot. The app chooses this approach because it is easy to understand and works well for a single owner with a small number of tasks each day. A more complex approach — like trying every possible ordering — would be slower and harder to explain to the user.
 
 ---
 
