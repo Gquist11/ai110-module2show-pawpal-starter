@@ -1,159 +1,201 @@
 import streamlit as st
 from datetime import date, time
-from pawpal_system import Priority, TimeWindow, Task, Pet, Owner, Scheduler, Notifications
+from pawpal_system import Priority, TimeWindow, Task, Pet, Owner, Scheduler
 
-st.set_page_config(page_title="PawPal+", page_icon="🐾", layout="centered")
+# ============================================================
+# Step 1 — Import
+# All classes come from pawpal_system.py (line above).
+# ============================================================
+
+st.set_page_config(page_title="PawPal+", page_icon="🐾", layout="wide")
 st.title("🐾 PawPal+")
 st.caption("Pet care planning assistant")
 
-# ---------------------------------------------------------------------------
-# Session state bootstrap
-# ---------------------------------------------------------------------------
+# ============================================================
+# Step 2 — Session State "vault"
+#
+# Streamlit reruns the whole script on every click.
+# We check whether an Owner already exists in the vault
+# before creating one — so the Owner (and its pets/tasks)
+# survives every rerun without being wiped.
+# ============================================================
 if "owner" not in st.session_state:
-    st.session_state.owner = None
+    st.session_state.owner = Owner(
+        name="Jordan",
+        availability_windows=[TimeWindow(time(7, 0), time(21, 0))],
+    )
 if "schedule" not in st.session_state:
     st.session_state.schedule = None
 
-# ---------------------------------------------------------------------------
-# Sidebar — owner + pet setup
-# ---------------------------------------------------------------------------
+# Shortcut so we don't type st.session_state.owner everywhere
+owner: Owner = st.session_state.owner
+
+# ============================================================
+# Sidebar — owner settings + Add Pet form
+# ============================================================
 with st.sidebar:
-    st.header("Owner & Pet Setup")
-    owner_name = st.text_input("Owner name", value="Jordan")
+    st.header("⚙️ Owner Settings")
+
+    new_name = st.text_input("Owner name", value=owner.name)
+    if new_name.strip() and new_name.strip() != owner.name:
+        owner.name = new_name.strip()
 
     st.subheader("Availability")
-    col1, col2 = st.columns(2)
-    with col1:
-        avail_start = st.time_input("From", value=time(7, 0))
-    with col2:
-        avail_end = st.time_input("To", value=time(21, 0))
+    c1, c2 = st.columns(2)
+    with c1:
+        avail_start = st.time_input("From", value=owner.availability_windows[0].start)
+    with c2:
+        avail_end = st.time_input("To", value=owner.availability_windows[0].end)
 
-    st.subheader("Pets")
-    if "pets_config" not in st.session_state:
-        st.session_state.pets_config = [{"name": "Mochi", "species": "dog", "breed": "Shiba", "age": 3.0}]
+    # Update the window live if the user changes the times
+    if (avail_start != owner.availability_windows[0].start
+            or avail_end != owner.availability_windows[0].end):
+        owner.availability_windows = [TimeWindow(avail_start, avail_end)]
 
-    for i, pc in enumerate(st.session_state.pets_config):
-        with st.expander(f"Pet {i+1}: {pc['name']}", expanded=(i == 0)):
-            pc["name"]    = st.text_input("Name",    value=pc["name"],    key=f"pname_{i}")
-            pc["species"] = st.selectbox("Species", ["dog","cat","other"], key=f"pspec_{i}",
-                                         index=["dog","cat","other"].index(pc["species"]))
-            pc["breed"]   = st.text_input("Breed",   value=pc["breed"],   key=f"pbreed_{i}")
-            pc["age"]     = st.number_input("Age (years)", value=pc["age"], min_value=0.0, step=0.5, key=f"page_{i}")
+    st.divider()
 
-    if st.button("+ Add pet"):
-        st.session_state.pets_config.append({"name": "New pet", "species": "dog", "breed": "", "age": 0.0})
-        st.rerun()
+    # --------------------------------------------------------
+    # Step 3 — Add Pet form wired to owner.add_pet()
+    #
+    # When the user submits this form:
+    #   1. We create a new Pet object from the form values.
+    #   2. We call owner.add_pet(new_pet) — the Owner class
+    #      method that registers the pet inside the Owner.
+    #   3. Because owner lives in session_state, the pet
+    #      is saved for every future rerun.
+    # --------------------------------------------------------
+    st.subheader("➕ Add a Pet")
+    with st.form("add_pet_form", clear_on_submit=True):
+        pet_name    = st.text_input("Pet name",    placeholder="e.g. Mochi")
+        pet_species = st.selectbox("Species",      ["dog", "cat", "other"])
+        pet_breed   = st.text_input("Breed",       placeholder="e.g. Shiba Inu")
+        pet_age     = st.number_input("Age (yrs)", min_value=0.0, step=0.5, value=1.0)
+        if st.form_submit_button("Add Pet") and pet_name.strip():
+            new_pet = Pet(
+                name=pet_name.strip(),
+                species=pet_species,
+                breed=pet_breed,
+                age_years=pet_age,
+            )
+            owner.add_pet(new_pet)   # <-- class method called here
+            st.success(f"Added {new_pet.name}!")
+            st.rerun()
 
-# ---------------------------------------------------------------------------
-# Main — task builder
-# ---------------------------------------------------------------------------
-st.subheader("Tasks")
+# ============================================================
+# Main — pet cards + Add Task forms
+# ============================================================
+pets = owner.get_pets()
 
-if "tasks_config" not in st.session_state:
-    st.session_state.tasks_config = [
-        {"title": "Morning walk",  "desc": "Leash walk around the block", "pet_idx": 0, "duration": 30, "priority": "high",   "recurrence": "daily", "earliest": None, "latest": None},
-        {"title": "Feeding",       "desc": "Half cup dry food",           "pet_idx": 0, "duration": 10, "priority": "high",   "recurrence": "daily", "earliest": None, "latest": None},
-        {"title": "Vet meds",      "desc": "Heartworm pill",              "pet_idx": 0, "duration":  5, "priority": "medium", "recurrence": "daily", "earliest": None, "latest": time(9, 0)},
-        {"title": "Grooming",      "desc": "Brush coat",                  "pet_idx": 0, "duration": 20, "priority": "low",    "recurrence": "",      "earliest": None, "latest": None},
-    ]
+if not pets:
+    st.info("No pets yet. Use the sidebar to add your first pet.")
+    st.stop()
 
-pet_names = [pc["name"] for pc in st.session_state.pets_config]
+st.subheader("🐾 Pets & Tasks")
 
-for i, tc in enumerate(st.session_state.tasks_config):
-    with st.expander(f"{tc['title']} [{tc['priority']}]", expanded=False):
-        c1, c2 = st.columns(2)
-        with c1:
-            tc["title"]    = st.text_input("Title",       value=tc["title"],    key=f"ttitle_{i}")
-            tc["desc"]     = st.text_input("Description", value=tc["desc"],     key=f"tdesc_{i}")
-            tc["priority"] = st.selectbox("Priority", ["high","medium","low"],  key=f"tpri_{i}",
-                                          index=["high","medium","low"].index(tc["priority"]))
-        with c2:
-            tc["duration"]   = st.number_input("Duration (min)", value=tc["duration"], min_value=1, key=f"tdur_{i}")
-            tc["recurrence"] = st.text_input("Recurrence (e.g. daily)", value=tc.get("recurrence",""), key=f"trec_{i}")
-            pet_idx = tc.get("pet_idx", 0)
-            tc["pet_idx"]    = st.selectbox("Assign to pet", range(len(pet_names)),
-                                            format_func=lambda x: pet_names[x],
-                                            index=min(pet_idx, len(pet_names)-1),
-                                            key=f"tpet_{i}")
+for pet in pets:
+    label = f"{pet.name}  ({pet.species}" \
+            + (f", {pet.breed}" if pet.breed else "") \
+            + f", {pet.age_years:.0f} yrs)  — {len(pet.get_tasks())} task(s)"
 
-if st.button("+ Add task"):
-    st.session_state.tasks_config.append({
-        "title": "New task", "desc": "", "pet_idx": 0,
-        "duration": 10, "priority": "medium", "recurrence": "", "earliest": None, "latest": None,
-    })
-    st.rerun()
+    with st.expander(label, expanded=True):
 
-# ---------------------------------------------------------------------------
-# Generate schedule
-# ---------------------------------------------------------------------------
+        # Show tasks already on this pet
+        if pet.get_tasks():
+            for task in pet.get_tasks():
+                icon = "✅" if task.completed else "○"
+                rec  = f" · _{task.recurrence}_" if task.recurrence else ""
+                st.markdown(
+                    f"{icon} **{task.title}** · {task.priority.value} · "
+                    f"{task.duration_minutes} min{rec}"
+                )
+        else:
+            st.caption("No tasks yet — add one below.")
+
+        # ----------------------------------------------------
+        # Step 3 — Add Task form wired to pet.add_task()
+        #
+        # When the user submits this form:
+        #   1. We create a Task from the form values.
+        #   2. We call pet.add_task(new_task) — the Pet class
+        #      method that attaches the task and sets its
+        #      required_pet_id automatically.
+        #   3. Because the pet lives inside the owner which
+        #      lives in session_state, the task is saved.
+        # ----------------------------------------------------
+        with st.form(f"add_task_{pet.id}", clear_on_submit=True):
+            st.markdown(f"**Add a task for {pet.name}**")
+            fc1, fc2 = st.columns(2)
+            with fc1:
+                t_title    = st.text_input("Title",       placeholder="e.g. Morning walk",   key=f"tt_{pet.id}")
+                t_desc     = st.text_input("Description", placeholder="e.g. Leash walk",     key=f"td_{pet.id}")
+                t_priority = st.selectbox("Priority", ["high", "medium", "low"],             key=f"tpri_{pet.id}")
+            with fc2:
+                t_duration   = st.number_input("Duration (min)", min_value=1, value=15,      key=f"tdur_{pet.id}")
+                t_recurrence = st.text_input("Recurrence",  placeholder="e.g. daily",        key=f"trec_{pet.id}")
+
+            if st.form_submit_button(f"Add task to {pet.name}") and t_title.strip():
+                new_task = Task(
+                    title=t_title.strip(),
+                    description=t_desc,
+                    duration_minutes=int(t_duration),
+                    priority=t_priority,
+                    recurrence=t_recurrence.strip() or None,
+                )
+                pet.add_task(new_task)   # <-- class method called here
+                st.success(f"Added '{new_task.title}' to {pet.name}!")
+                st.rerun()
+
+# ============================================================
+# Build & display the schedule
+# ============================================================
 st.divider()
-st.subheader("Build Schedule")
-target_date = st.date_input("Schedule for", value=date.today())
+st.subheader("📅 Build Schedule")
 
-if st.button("Generate schedule", type="primary"):
-    # Build Owner
-    owner = Owner(owner_name, availability_windows=[TimeWindow(avail_start, avail_end)])
+pending = owner.all_pending_tasks()
+if not pending:
+    st.warning("No pending tasks yet. Add tasks to your pets above.")
+else:
+    dc1, dc2 = st.columns([3, 1])
+    with dc1:
+        target_date = st.date_input("Schedule for", value=date.today())
+    with dc2:
+        st.metric("Pending tasks", len(pending))
 
-    # Build Pets
-    pets = []
-    for pc in st.session_state.pets_config:
-        pets.append(Pet(pc["name"], pc["species"], pc["breed"], pc["age"]))
-        owner.add_pet(pets[-1])
+    if st.button("Generate schedule", type="primary"):
+        # owner already holds all pets and their tasks — pass it straight in
+        schedule = Scheduler().generate_daily_plan(owner, target_date)
+        st.session_state.schedule = schedule  # save to vault
 
-    # Attach Tasks to correct pet
-    for tc in st.session_state.tasks_config:
-        pidx = tc.get("pet_idx", 0)
-        if pidx >= len(pets):
-            pidx = 0
-        task = Task(
-            title=tc["title"],
-            description=tc["desc"],
-            duration_minutes=int(tc["duration"]),
-            priority=tc["priority"],
-            recurrence=tc["recurrence"] or None,
-            earliest_start=tc.get("earliest"),
-            latest_end=tc.get("latest"),
-        )
-        pets[pidx].add_task(task)
-
-    # Run scheduler
-    scheduler = Scheduler()
-    schedule  = scheduler.generate_daily_plan(owner, target_date)
-
-    st.session_state.owner    = owner
-    st.session_state.schedule = schedule
-
-# ---------------------------------------------------------------------------
-# Display schedule
-# ---------------------------------------------------------------------------
+# ---- Results ----
 if st.session_state.schedule:
-    schedule = st.session_state.schedule
-    owner    = st.session_state.owner
+    sched = st.session_state.schedule
 
-    st.success(f"Scheduled {len(schedule.slots)} tasks — {schedule.total_minutes_scheduled} minutes total")
+    st.success(
+        f"Scheduled {len(sched.slots)} tasks — "
+        f"{sched.total_minutes_scheduled} minutes total"
+    )
 
-    # Scheduled slots
-    if schedule.slots:
+    if sched.slots:
         st.markdown("### Today's Plan")
-        for slot in schedule.slots:
-            start = slot.start.strftime("%H:%M") if slot.start else "?"
-            end   = slot.end.strftime("%H:%M")   if slot.end   else "?"
-            pet   = owner.get_pet(slot.pet_id)
+        for slot in sched.slots:
+            start     = slot.start.strftime("%I:%M %p") if slot.start else "?"
+            end       = slot.end.strftime("%I:%M %p")   if slot.end   else "?"
+            pet       = owner.get_pet(slot.pet_id)
             pet_label = f" · {pet.name}" if pet else ""
-            icon  = "✅" if slot.status == "completed" else "🕐"
-            st.markdown(f"{icon} **{start}–{end}** &nbsp; {slot.title}{pet_label}  \n<small>{slot.reason}</small>", unsafe_allow_html=True)
+            icon      = "✅" if slot.status == "completed" else "🕐"
+            st.markdown(
+                f"{icon} **{start} – {end}** &nbsp; {slot.title}{pet_label}  \n"
+                f"<small style='color:gray'>{slot.reason}</small>",
+                unsafe_allow_html=True,
+            )
 
-    # Skipped tasks
-    if schedule.skipped_tasks:
-        st.markdown("### Skipped Tasks")
-        for t in schedule.skipped_tasks:
-            st.warning(f"⚠️ {t.title} — couldn't fit in the availability window")
+    if sched.skipped_tasks:
+        st.markdown("### ⚠️ Could not fit")
+        for t in sched.skipped_tasks:
+            st.warning(f"{t.title} — outside your availability window")
 
-    # Owner summary
     with st.expander("Owner summary"):
-        scheduler = Scheduler()
-        st.text(scheduler.summary(owner))
+        st.text(Scheduler().summary(owner))
 
-    # JSON export
     with st.expander("Export as JSON"):
-        st.code(schedule.persist(), language="json")
+        st.code(sched.persist(), language="json")
